@@ -1,0 +1,310 @@
+<html>
+
+<head>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 50px;
+      font-family: Arial, sans-serif;
+      background-image: url('background.png');
+      background-size: cover;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+    }
+
+    #score {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    #gameCanvas {
+      border: 1px solid black;
+    }
+
+    #restart {
+      margin-top: 20px;
+      padding: 20px 36px;
+      font-size: 20px;
+      background-color: #4fe754;
+      color: white;
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    #restart:hover {
+      background-color: #4ed655;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="score">Score: 0</div>
+  <canvas id="gameCanvas" width="400" height="400"></canvas>
+  <button id="restart">RESTART</button>
+</body>
+
+<script>
+  const tileSize = 100;
+  const gridSize = 4;
+  let score = 0;
+  let gameOver = false;
+  let idCounter = 0;
+  const moveSound = new Audio('Sounds/move.wav');
+  moveSound.volume = 0.1;
+  const gameOverSound = new Audio('Sounds/gameover.wav');
+  gameOverSound.volume = 0.5;
+  const start = new Audio('Sounds/start.wav');
+  start.volume = 0.1;
+
+  const Position = (row, col) => ({ row, col });
+  const Value = (val) => ({ val });
+  const createEntity = (id, components) => ({ id, ...components });
+  const createTile = (row, col, val) => {
+    return createEntity(idCounter++, {
+      Position: Position(row, col),
+      Value: Value(val),
+      previous: Position(row, col),
+      merged: false,
+      scale: 1
+    });
+  };
+
+  const initGameState = () => {
+    idCounter = 0;
+    gameOver = false;
+    document.getElementById("score").innerText = "Score: 0";
+    return [createTile(0, 0, 2), createTile(1, 0, 2)];
+  };
+
+  let gameState = initGameState();
+
+  let animationFrames = [];
+
+  const handleInput = (state, direction) => {
+    let moved = false;
+    let newState = [];
+    const order = [...Array(gridSize).keys()];
+    if (direction === "ArrowRight" || direction === "ArrowDown") order.reverse();
+
+    for (let i = 0; i < gridSize; i++) {
+      let line = state.filter(t =>
+        direction === "ArrowLeft" || direction === "ArrowRight"
+          ? t.Position.row === i
+          : t.Position.col === i
+      );
+
+      line.sort((a, b) =>
+        direction === "ArrowLeft"
+          ? a.Position.col - b.Position.col
+          : direction === "ArrowRight"
+            ? b.Position.col - a.Position.col
+            : direction === "ArrowUp"
+              ? a.Position.row - b.Position.row
+              : b.Position.row - a.Position.row
+      );
+
+      let mergedLine = [];
+      for (let j = 0; j < line.length; j++) {
+        const current = line[j];
+        const pos = direction === "ArrowLeft" || direction === "ArrowRight"
+          ? Position(i, order[mergedLine.length])
+          : Position(order[mergedLine.length], i);
+
+        current.previous = current.Position;
+        current.Position = pos;
+
+        if (
+          j < line.length - 1 &&
+          current.Value.val === line[j + 1].Value.val
+        ) {
+          const mergedVal = current.Value.val * 2;
+          const mergedTile = createTile(pos.row, pos.col, mergedVal);
+          mergedTile.merged = true;
+          mergedTile.scale = 1.2;
+
+          mergedLine.push(mergedTile);
+          j++;
+          moved = true;
+        } else {
+          mergedLine.push(current);
+          moved = true;
+        }
+      }
+
+      newState = newState.filter(
+        t =>
+          !line.find(
+            lt => lt.Position.row === t.Position.row && lt.Position.col === t.Position.col
+          )
+      );
+      newState.push(...mergedLine);
+    }
+    return moved ? newState : state;
+  };
+
+  const generateNewTile = (state) => {
+    const occupied = state.map(t => t.Position.row * gridSize + t.Position.col);
+    const empty = [];
+    for (let i = 0; i < gridSize * gridSize; i++) {
+      if (!occupied.includes(i)) empty.push(i);
+    }
+    if (empty.length === 0) return state;
+
+    const spot = empty[Math.floor(Math.random() * empty.length)];
+    const row = Math.floor(spot / gridSize);
+    const col = spot % gridSize;
+    const newTile = createTile(row, col, Math.random() < 0.9 ? 2 : 4);
+    newTile.scale = 0;
+    return [...state, newTile];
+  };
+
+  const calculateScore = (state) => {
+    score = state.reduce((sum, tile) => sum + tile.Value.val, 0);
+    document.getElementById("score").innerText = "Score: " + score;
+    return state;
+  };
+
+  const getTileColor = (val) => {
+    switch (val) {
+      case 2: return "#9dcaff";
+      case 4: return "#8bc0ff";
+      case 8: return "#478de0";
+      case 16: return "#2878d6";
+      case 32: return "#0a58b5";
+      case 64: return "#42ce75";
+      case 128: return "#33d130";
+      case 256: return "#1cb819";
+      case 512: return "#079c04";
+      case 1024: return "#2e382e";
+      case 2048: return "#000000";
+      default: return "#ff0000";
+    }
+  };
+
+  const isGameOver = (state) => {
+    if (state.length < gridSize * gridSize) return false;
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) {
+        const tile = state.find(t => t.Position.row === r && t.Position.col === c);
+        if (!tile) continue;
+        const right = state.find(t => t.Position.row === r && t.Position.col === c + 1);
+        const down = state.find(t => t.Position.row === r + 1 && t.Position.col === c);
+        if ((right && right.Value.val === tile.Value.val) ||
+          (down && down.Value.val === tile.Value.val)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  const render = (state) => {
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const padding = 5;
+
+    ctx.fillStyle = "#ccc";
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) {
+        ctx.fillRect(
+          c * tileSize + padding / 2,
+          r * tileSize + padding / 2,
+          tileSize - padding,
+          tileSize - padding
+        );
+      }
+    }
+
+    state.forEach((tile) => {
+      const progress = tile.animationProgress ?? 1;
+      const row = tile.previous ? tile.previous.row + (tile.Position.row - tile.previous.row) * progress : tile.Position.row;
+      const col = tile.previous ? tile.previous.col + (tile.Position.col - tile.previous.col) * progress : tile.Position.col;
+
+      const x = col * tileSize + padding / 2;
+      const y = row * tileSize + padding / 2;
+      const size = (tileSize - padding) * (tile.scale ?? 1);
+
+      const offset = (tileSize - padding - size) / 2;
+
+      ctx.fillStyle = getTileColor(tile.Value.val);
+      ctx.fillRect(x + offset, y + offset, size, size);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `${30 * (tile.scale ?? 1)}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tile.Value.val, x + size / 2 + offset, y + size / 2 + offset);
+    });
+
+    if (gameOver) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "white";
+      ctx.font = "40px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2);
+    }
+  };
+
+  let animationTime = 200;
+  let lastTime = 0;
+
+  const gameLoop = (timestamp) => {
+    if (!lastTime) lastTime = timestamp;
+    const delta = timestamp - lastTime;
+
+    let progress = Math.min(delta / animationTime, 1);
+
+    gameState.forEach(t => {
+      t.animationProgress = progress;
+
+      if (!t.merged && t.scale < 1) {
+        t.scale = Math.min(t.scale + 0.1, 1);
+      }
+
+      if (t.merged) {
+        t.scale -= 0.05;
+        if (t.scale <= 1) {
+          t.scale = 1;
+          t.merged = false;
+        }
+      }
+    });
+    render(gameState);
+    requestAnimationFrame(gameLoop);
+  };
+
+  window.addEventListener("keydown", (e) => {
+    if (gameOver) return;
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code)) {
+      const movedState = handleInput(gameState, e.code);
+      if (movedState !== gameState) {
+        gameState = movedState;
+        moveSound.play();
+        gameState = generateNewTile(gameState);
+        gameState = calculateScore(gameState);
+        if (isGameOver(gameState)) {
+          gameOver = true;
+          gameOverSound.play();
+        }
+        lastTime = 0;
+      }
+
+    }
+  });
+
+  document.getElementById("restart").addEventListener("click", () => {
+    gameState = initGameState();
+    gameState = calculateScore(gameState);
+    start.play();
+    lastTime = 0;
+  });
+
+  requestAnimationFrame(gameLoop);
+</script>
